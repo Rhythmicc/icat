@@ -145,20 +145,22 @@ void render_and_display(unsigned char* img, int width, int height, int channels,
 
     if (is_kitty) {
         unsigned char* raw_data = img;
-        std::vector<unsigned char> rgb_buffer;
-        if (channels != 3) {
+        std::vector<unsigned char> rgba_buffer;
+        int target_channels = channels;
+        if (channels != 3 && channels != 4) {
             Timer t("Channel Conv");
-            rgb_buffer.resize(width * height * 3);
+            rgba_buffer.resize(width * height * 3);
             #pragma omp parallel for
             for (int i = 0; i < width * height; ++i) {
-                rgb_buffer[i*3+0] = img[i*channels+0];
-                rgb_buffer[i*3+1] = (channels > 1) ? img[i*channels+1] : img[i*channels+0];
-                rgb_buffer[i*3+2] = (channels > 2) ? img[i*channels+2] : img[i*channels+0];
+                rgba_buffer[i*3+0] = img[i*channels+0];
+                rgba_buffer[i*3+1] = (channels > 1) ? img[i*channels+1] : img[i*channels+0];
+                rgba_buffer[i*3+2] = (channels > 2) ? img[i*channels+2] : img[i*channels+0];
             }
-            raw_data = rgb_buffer.data();
+            raw_data = rgba_buffer.data();
+            target_channels = 3;
         }
 
-        std::string b64 = base64_encode(raw_data, width * height * 3);
+        std::string b64 = base64_encode(raw_data, width * height * target_channels);
         
         Timer t_io("Terminal Output (IO)");
         size_t current_pos = 0;
@@ -169,22 +171,26 @@ void render_and_display(unsigned char* img, int width, int height, int channels,
             bool is_last = (current_pos + chunk_size >= total_len);
             std::cout << "\033_G";
             if (current_pos == 0) {
-                std::cout << "a=T,f=24,s=" << width << ",v=" << height << ",c=" << img_cols << ",r=" << img_rows << ",";
+                int format = (target_channels == 4) ? 32 : 24;
+                std::cout << "a=T,f=" << format << ",s=" << width << ",v=" << height << ",c=" << img_cols << ",r=" << img_rows << ",";
             }
             std::cout << "m=" << (is_last ? "0" : "1") << ";" << chunk << "\033\\";
             current_pos += chunk_size;
         }
         std::cout << "\n";
     } else {
-        std::vector<unsigned char> jpg_data;
-        {
+        std::vector<unsigned char> encoded_data;
+        if (channels == 4) {
+            Timer t("PNG Encoding");
+            stbi_write_png_to_func(my_stbi_write_func, &encoded_data, width, height, channels, img, width * channels);
+        } else {
             Timer t("JPEG Encoding");
-            stbi_write_jpg_to_func(my_stbi_write_func, &jpg_data, width, height, channels, img, 85);
+            stbi_write_jpg_to_func(my_stbi_write_func, &encoded_data, width, height, channels, img, 85);
         }
-        std::string b64 = base64_encode(jpg_data.data(), jpg_data.size());
+        std::string b64 = base64_encode(encoded_data.data(), encoded_data.size());
         
         Timer t_io("Terminal Output (IO)");
-        std::cout << "\033]1337;File=inline=1;size=" << jpg_data.size() 
+        std::cout << "\033]1337;File=inline=1;size=" << encoded_data.size() 
                   << ";width=" << display_width << "px"
                   << ";height=" << display_height << "px"
                   << ";preserveAspectRatio=1"
@@ -229,8 +235,6 @@ void display_image(const std::string& filename) {
 
             cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, i_width, i_height);
             cairo_t* cr = cairo_create(surface);
-            cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-            cairo_paint(cr);
             cairo_scale(cr, (double)i_width / width, (double)i_height / height);
             
             {
@@ -241,7 +245,7 @@ void display_image(const std::string& filename) {
             
             unsigned char* data = cairo_image_surface_get_data(surface);
             int stride = cairo_image_surface_get_stride(surface);
-            std::vector<unsigned char> rgb_data(i_width * i_height * 3);
+            std::vector<unsigned char> rgba_data(i_width * i_height * 4);
             {
                 Timer t_conv("Pixel Conv");
                 #pragma omp parallel for
@@ -249,13 +253,14 @@ void display_image(const std::string& filename) {
                     uint32_t* row = (uint32_t*)(data + y * stride);
                     for (int x = 0; x < i_width; ++x) {
                         uint32_t pixel = row[x];
-                        rgb_data[(y * i_width + x) * 3 + 0] = (pixel >> 16) & 0xff;
-                        rgb_data[(y * i_width + x) * 3 + 1] = (pixel >> 8) & 0xff;
-                        rgb_data[(y * i_width + x) * 3 + 2] = (pixel >> 0) & 0xff;
+                        rgba_data[(y * i_width + x) * 4 + 0] = (pixel >> 16) & 0xff;
+                        rgba_data[(y * i_width + x) * 4 + 1] = (pixel >> 8) & 0xff;
+                        rgba_data[(y * i_width + x) * 4 + 2] = (pixel >> 0) & 0xff;
+                        rgba_data[(y * i_width + x) * 4 + 3] = (pixel >> 24) & 0xff;
                     }
                 }
             }
-            render_and_display(rgb_data.data(), i_width, i_height, 3, false);
+            render_and_display(rgba_data.data(), i_width, i_height, 4, false);
             cairo_destroy(cr);
             cairo_surface_destroy(surface);
             g_object_unref(handle);
@@ -286,7 +291,7 @@ void display_image(const std::string& filename) {
                 if (img.is_valid()) {
                     int width = img.width();
                     int height = img.height();
-                    std::vector<unsigned char> rgb_data(width * height * 3);
+                    std::vector<unsigned char> rgba_data(width * height * 4);
                     {
                         Timer t_conv("Pixel Conv");
                         const char* data = img.const_data();
@@ -296,13 +301,14 @@ void display_image(const std::string& filename) {
                             const uint32_t* row = (const uint32_t*)(data + y * stride);
                             for (int x = 0; x < width; ++x) {
                                 uint32_t pixel = row[x];
-                                rgb_data[(y * width + x) * 3 + 0] = (pixel >> 16) & 0xff;
-                                rgb_data[(y * width + x) * 3 + 1] = (pixel >> 8) & 0xff;
-                                rgb_data[(y * width + x) * 3 + 2] = (pixel >> 0) & 0xff;
+                                rgba_data[(y * width + x) * 4 + 0] = (pixel >> 16) & 0xff;
+                                rgba_data[(y * width + x) * 4 + 1] = (pixel >> 8) & 0xff;
+                                rgba_data[(y * width + x) * 4 + 2] = (pixel >> 0) & 0xff;
+                                rgba_data[(y * width + x) * 4 + 3] = (pixel >> 24) & 0xff;
                             }
                         }
                     }
-                    render_and_display(rgb_data.data(), width, height, 3, false);
+                    render_and_display(rgba_data.data(), width, height, 4, false);
                 }
                 delete p;
             }
