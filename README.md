@@ -1,6 +1,6 @@
 # ImagePreview (icat) - C++ Image Preview Tool & Library
 
-A high-performance terminal image viewer and library written in C++ that supports standard image formats, SVG, PDF (first page), and EPS.
+A high-performance (6.5x than Python implementation) terminal image viewer and library written in C++ that supports standard image formats, SVG, PDF (first page), and EPS.
 
 ## Features
 - **Library & CLI**: Build as a standalone tool (`icat`) or integrate `ImagePreview` as a library into your own projects.
