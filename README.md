@@ -41,10 +41,9 @@ sudo dnf install cmake gcc-c++ pkgconfig poppler-cpp-devel librsvg2-devel cairo-
 Standard build and installation:
 
 ```bash
-mkdir -p build && cd build
-cmake ..
-make
-sudo cmake --install .
+cmake -S . -B build
+cmake --build build -j
+sudo cmake --install build
 ```
 
 ### Build Options
@@ -59,7 +58,7 @@ You can customize the build during the configuration step:
 Example:
 
 ```bash
-cmake -DBUILD_SHARED_LIBS=ON -DENABLE_PDF=OFF -DFORCE_KITTY_PROTOCOL=ON ..
+cmake -DBUILD_SHARED_LIBS=ON -DENABLE_PDF=OFF -DFORCE_KITTY_PROTOCOL=ON -S . -B build
 ```
 
 ## Using as a Library
