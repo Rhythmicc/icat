@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(ENABLE_PDF "Enable PDF/EPS support using Poppler" ON)
 option(ENABLE_SVG "Enable SVG support using librsvg" ON)
+option(FORCE_KITTY_PROTOCOL "Force Kitty protocol output regardless of terminal detection" OFF)
 
 find_package(PkgConfig REQUIRED)
 
@@ -34,6 +35,10 @@ target_include_directories(ImagePreview PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
+
+if(FORCE_KITTY_PROTOCOL)
+    target_compile_definitions(ImagePreview PRIVATE FORCE_KITTY_PROTOCOL)
+endif()
 
 if(OPENMP_FOUND)
     if(APPLE AND LIBOMP_PREFIX)

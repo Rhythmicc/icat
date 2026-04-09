@@ -139,9 +139,13 @@ void render_and_display(unsigned char* img, int width, int height, int channels,
     std::string term = term_env ? term_env : "";
     std::string term_program = term_prog_env ? term_prog_env : "";
 
+#ifdef FORCE_KITTY_PROTOCOL
+    bool is_kitty = true;
+#else
     bool is_kitty = (term.find("kitty") != std::string::npos || 
                      term_program.find("ghostty") != std::string::npos || 
                      term_program.find("Ghostty") != std::string::npos);
+#endif
 
     if (is_kitty) {
         unsigned char* raw_data = img;

@@ -46,10 +46,11 @@ You can customize the build during the configuration step:
 - `-DBUILD_SHARED_LIBS=ON`: Build as a shared library instead of static.
 - `-DENABLE_PDF=OFF`: Disable PDF/EPS support.
 - `-DENABLE_SVG=OFF`: Disable SVG support.
+- `-DFORCE_KITTY_PROTOCOL=ON`: Always use the Kitty output path even if terminal detection would normally fail.
 
 Example:
 ```bash
-cmake -DBUILD_SHARED_LIBS=ON -DENABLE_PDF=OFF ..
+cmake -DBUILD_SHARED_LIBS=ON -DENABLE_PDF=OFF -DFORCE_KITTY_PROTOCOL=ON ..
 ```
 
 ## Using as a Library
