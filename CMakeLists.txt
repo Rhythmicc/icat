@@ -108,8 +108,34 @@ install(EXPORT ImagePreviewTargets
 )
 
 include(CMakePackageConfigHelpers)
+
+set(IMAGE_PREVIEW_CONFIG_TEMPLATE "${CMAKE_CURRENT_BINARY_DIR}/ImagePreviewConfig.cmake.in")
+file(WRITE "${IMAGE_PREVIEW_CONFIG_TEMPLATE}" [=[@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# OpenMP might be needed
+if(NOT TARGET OpenMP::OpenMP_CXX AND NOT APPLE)
+    find_dependency(OpenMP)
+endif()
+
+# PkgConfig modules
+find_dependency(PkgConfig)
+
+if(@HAVE_POPPLER_INTERNAL@)
+    pkg_check_modules(POPPLER IMPORTED_TARGET poppler-cpp)
+endif()
+
+if(@HAVE_RSVG_INTERNAL@)
+    pkg_check_modules(RSVG IMPORTED_TARGET librsvg-2.0)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/ImagePreviewTargets.cmake")
+check_required_components(ImagePreview)
+]=])
+
 configure_package_config_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/CMakeConfig.cmake.in
+    ${IMAGE_PREVIEW_CONFIG_TEMPLATE}
     ${CMAKE_CURRENT_BINARY_DIR}/ImagePreviewConfig.cmake
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ImagePreview
 )
