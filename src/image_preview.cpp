@@ -10,6 +10,8 @@
 #include <omp.h>
 #include <chrono>
 #include <mutex>
+#include <cctype>
+#include <limits>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -48,6 +50,10 @@
 #ifdef HAVE_OPENCV_CUDA
 #include <opencv2/cudawarping.hpp>
 #endif
+#endif
+
+#ifdef HAVE_CURL
+#include <curl/curl.h>
 #endif
 
 using namespace std::chrono;
@@ -353,6 +359,76 @@ static bool ends_with(const std::string& value, const std::string& ending) {
     });
 }
 
+static bool starts_with_scheme(const std::string& value, const std::string& scheme) {
+    if (scheme.size() > value.size()) return false;
+    return std::equal(scheme.begin(), scheme.end(), value.begin(), [](char a, char b) {
+        return std::tolower((unsigned char)a) == std::tolower((unsigned char)b);
+    });
+}
+
+static bool is_http_url(const std::string& value) {
+    return starts_with_scheme(value, "http://") || starts_with_scheme(value, "https://");
+}
+
+#ifdef HAVE_CURL
+static size_t write_http_response(void* ptr, size_t size, size_t nmemb, void* userdata) {
+    constexpr size_t max_download_size = 100 * 1024 * 1024;
+    size_t bytes = size * nmemb;
+    auto* data = static_cast<std::vector<unsigned char>*>(userdata);
+    if (bytes > max_download_size || data->size() > max_download_size - bytes) {
+        return 0;
+    }
+    const auto* begin = static_cast<unsigned char*>(ptr);
+    data->insert(data->end(), begin, begin + bytes);
+    return bytes;
+}
+
+static bool download_url(const std::string& url, std::vector<unsigned char>& data) {
+    Timer t("HTTP Download");
+    data.clear();
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        std::cerr << "Error: Failed to initialize libcurl." << std::endl;
+        return false;
+    }
+
+    char error[CURL_ERROR_SIZE] = {0};
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "icat/0.1");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_http_response);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &data);
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, error);
+
+    CURLcode result = curl_easy_perform(curl);
+    long status = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    curl_easy_cleanup(curl);
+
+    if (result != CURLE_OK) {
+        std::cerr << "Error: Failed to download URL: "
+                  << (error[0] ? error : curl_easy_strerror(result)) << std::endl;
+        return false;
+    }
+
+    if (status < 200 || status >= 300) {
+        std::cerr << "Error: HTTP request failed with status " << status << "." << std::endl;
+        return false;
+    }
+
+    if (data.empty()) {
+        std::cerr << "Error: URL returned an empty response." << std::endl;
+        return false;
+    }
+
+    return true;
+}
+#endif
+
 #ifdef HAVE_LIBJPEG
 // Defined in src/jpeg_loader.cpp
 unsigned char* load_jpeg_prescaled(const char* filename,
@@ -362,9 +438,17 @@ unsigned char* load_jpeg_prescaled(const char* filename,
 
 void display_image(const std::string& filename) {
     Timer total("Total Time");
+    bool url_input = is_http_url(filename);
+
+    if (url_input) {
+#ifndef HAVE_CURL
+        std::cerr << "Error: This build does not include libcurl, so HTTP(S) URLs are not supported." << std::endl;
+        return;
+#endif
+    }
 
 #ifdef HAVE_RSVG
-    if (ends_with(filename, ".svg")) {
+    if (!url_input && ends_with(filename, ".svg")) {
         Timer t_svg("SVG Processing");
         GError* error = NULL;
         RsvgHandle* handle = rsvg_handle_new_from_file(filename.c_str(), &error);
@@ -436,7 +520,7 @@ void display_image(const std::string& filename) {
 #endif
 
 #ifdef HAVE_POPPLER
-    if (ends_with(filename, ".pdf") || ends_with(filename, ".eps") || ends_with(filename, ".ps")) {
+    if (!url_input && (ends_with(filename, ".pdf") || ends_with(filename, ".eps") || ends_with(filename, ".ps"))) {
         Timer t_pdf("PDF Processing");
         poppler::document* doc;
         {
@@ -508,23 +592,39 @@ void display_image(const std::string& filename) {
 
     int width, height, channels;
     unsigned char* img;
+    std::vector<unsigned char> url_data;
     {
         Timer t_load("Image Load");
         img = nullptr;
-#ifdef HAVE_LIBJPEG
-        if (ends_with(filename, ".jpg") || ends_with(filename, ".jpeg")) {
-            // Get terminal limits before decode so we can prescale in the DCT domain.
-            // This mirrors what PIL/libjpeg does and avoids full-res decode + software resize.
-            double max_w_px, max_h_px, ppc, ppr;
-            get_terminal_max_pixels(max_w_px, max_h_px, ppc, ppr);
-            img = load_jpeg_prescaled(filename.c_str(), width, height, channels,
-                                       (int)max_w_px, (int)max_h_px);
-        }
+        if (url_input) {
+#ifdef HAVE_CURL
+            if (!download_url(filename, url_data)) return;
+            if (url_data.size() > (size_t)std::numeric_limits<int>::max()) {
+                std::cerr << "Error: Downloaded image is too large to decode." << std::endl;
+                return;
+            }
+            img = stbi_load_from_memory(url_data.data(), (int)url_data.size(),
+                                        &width, &height, &channels, 0);
 #endif
-        if (!img)
-            img = stbi_load(filename.c_str(), &width, &height, &channels, 0);
+        } else {
+#ifdef HAVE_LIBJPEG
+            if (ends_with(filename, ".jpg") || ends_with(filename, ".jpeg")) {
+                // Get terminal limits before decode so we can prescale in the DCT domain.
+                // This mirrors what PIL/libjpeg does and avoids full-res decode + software resize.
+                double max_w_px, max_h_px, ppc, ppr;
+                get_terminal_max_pixels(max_w_px, max_h_px, ppc, ppr);
+                img = load_jpeg_prescaled(filename.c_str(), width, height, channels,
+                                           (int)max_w_px, (int)max_h_px);
+            }
+#endif
+            if (!img)
+                img = stbi_load(filename.c_str(), &width, &height, &channels, 0);
+        }
     }
-    if (!img) return;
+    if (!img) {
+        std::cerr << "Error: Failed to load image." << std::endl;
+        return;
+    }
     render_and_display(img, width, height, channels, true);
 }
 

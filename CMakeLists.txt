@@ -11,6 +11,7 @@ option(ENABLE_SVG "Enable SVG support using librsvg" ON)
 option(FORCE_KITTY_PROTOCOL "Force Kitty protocol output regardless of terminal detection" OFF)
 
 find_package(PkgConfig REQUIRED)
+find_package(CURL QUIET)
 
 # OpenMP support (especially for macOS)
 if(APPLE)
@@ -38,6 +39,21 @@ target_include_directories(ImagePreview PUBLIC
 
 if(FORCE_KITTY_PROTOCOL)
     target_compile_definitions(ImagePreview PRIVATE FORCE_KITTY_PROTOCOL)
+endif()
+
+set(HAVE_CURL_INTERNAL OFF)
+if(CURL_FOUND)
+    target_compile_definitions(ImagePreview PRIVATE HAVE_CURL)
+    if(TARGET CURL::libcurl)
+        target_link_libraries(ImagePreview PRIVATE CURL::libcurl)
+    else()
+        target_include_directories(ImagePreview PRIVATE ${CURL_INCLUDE_DIRS})
+        target_link_libraries(ImagePreview PRIVATE ${CURL_LIBRARIES})
+    endif()
+    set(HAVE_CURL_INTERNAL ON)
+    message(STATUS "libcurl found, HTTP(S) image URLs enabled")
+else()
+    message(STATUS "libcurl not found, HTTP(S) image URLs disabled")
 endif()
 
 if(OPENMP_FOUND)
@@ -170,6 +186,10 @@ endif()
 
 # PkgConfig modules
 find_dependency(PkgConfig)
+
+if(@HAVE_CURL_INTERNAL@)
+    find_dependency(CURL)
+endif()
 
 if(@HAVE_POPPLER_INTERNAL@)
     pkg_check_modules(POPPLER IMPORTED_TARGET poppler-cpp)
