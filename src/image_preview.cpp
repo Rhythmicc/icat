@@ -359,6 +359,144 @@ static bool ends_with(const std::string& value, const std::string& ending) {
     });
 }
 
+bool is_pdf_filename(const std::string& filename) {
+    return ends_with(filename, ".pdf");
+}
+
+struct PdfDocument::Impl {
+#ifdef HAVE_POPPLER
+    std::unique_ptr<poppler::document> document;
+#endif
+};
+
+PdfDocument::PdfDocument() : impl_(new Impl) {}
+PdfDocument::~PdfDocument() = default;
+PdfDocument::PdfDocument(PdfDocument&&) noexcept = default;
+PdfDocument& PdfDocument::operator=(PdfDocument&&) noexcept = default;
+
+bool PdfDocument::open(const std::string& filename, std::string& error) {
+    error.clear();
+#ifdef HAVE_POPPLER
+    Timer t_load("PDF Load");
+    impl_->document.reset(poppler::document::load_from_file(filename));
+    if (!impl_->document) {
+        error = "Failed to open PDF document: " + filename;
+        return false;
+    }
+    if (impl_->document->pages() <= 0) {
+        impl_->document.reset();
+        error = "PDF document contains no pages: " + filename;
+        return false;
+    }
+    return true;
+#else
+    (void)filename;
+    error = "This build does not include Poppler, so PDF support is unavailable.";
+    return false;
+#endif
+}
+
+bool PdfDocument::is_open() const {
+#ifdef HAVE_POPPLER
+    return impl_ && impl_->document != nullptr;
+#else
+    return false;
+#endif
+}
+
+int PdfDocument::page_count() const {
+#ifdef HAVE_POPPLER
+    return is_open() ? impl_->document->pages() : 0;
+#else
+    return 0;
+#endif
+}
+
+bool PdfDocument::display_page(int page_number, std::string& error) const {
+    error.clear();
+#ifdef HAVE_POPPLER
+    if (!is_open()) {
+        error = "No PDF document is open.";
+        return false;
+    }
+    if (page_number < 1 || page_number > page_count()) {
+        error = "Page " + std::to_string(page_number) + " is outside the valid range 1-" +
+                std::to_string(page_count()) + ".";
+        return false;
+    }
+
+    Timer t_pdf("PDF Processing");
+    std::unique_ptr<poppler::page> page(impl_->document->create_page(page_number - 1));
+    if (!page) {
+        error = "Failed to load PDF page " + std::to_string(page_number) + ".";
+        return false;
+    }
+
+    // Compute an ideal DPI for the current terminal size. This is repeated on
+    // each render so TUI redraws react to terminal resizing.
+    double max_w_pdf, max_h_pdf, px_per_col_pdf, px_per_row_pdf;
+    get_terminal_max_pixels(max_w_pdf, max_h_pdf, px_per_col_pdf, px_per_row_pdf);
+    poppler::rectf page_rect = page->page_rect();
+    double page_w_pts = page_rect.width();
+    double page_h_pts = page_rect.height();
+    double dpi_x = (page_w_pts > 0) ? max_w_pdf * 72.0 / page_w_pts : 150.0;
+    double dpi_y = (page_h_pts > 0) ? max_h_pdf * 72.0 / page_h_pts : 150.0;
+    double dpi = std::max(72.0, std::min({dpi_x, dpi_y, 300.0}));
+
+    poppler::image image;
+    {
+        Timer t_render("PDF Render");
+        poppler::page_renderer renderer;
+        renderer.set_render_hint(poppler::page_renderer::antialiasing, true);
+        renderer.set_render_hint(poppler::page_renderer::text_antialiasing, true);
+        image = renderer.render_page(page.get(), dpi, dpi);
+    }
+    if (!image.is_valid()) {
+        error = "Failed to render PDF page " + std::to_string(page_number) + ".";
+        return false;
+    }
+
+    int width = image.width();
+    int height = image.height();
+    std::vector<unsigned char> rgba_data(width * height * 4);
+    {
+        Timer t_conv("Pixel Conv");
+        // Poppler ARGB32 has the same byte layout as Cairo ARGB32 (BGRA on LE).
+#ifdef HAVE_METAL
+        const uint8_t perm[4] = {2, 1, 0, 3}; // BGRA -> RGBA
+        vImage_Buffer src_vimg = { (void*)image.const_data(),
+            (vImagePixelCount)height, (vImagePixelCount)width,
+            (size_t)image.bytes_per_row() };
+        vImage_Buffer dst_vimg = { rgba_data.data(),
+            (vImagePixelCount)height, (vImagePixelCount)width,
+            (size_t)(width * 4) };
+        vImagePermuteChannels_ARGB8888(&src_vimg, &dst_vimg, perm, kvImageNoFlags);
+#else
+        const char* data = image.const_data();
+        int stride = image.bytes_per_row();
+        #pragma omp parallel for
+        for (int y = 0; y < height; ++y) {
+            const uint32_t* row = (const uint32_t*)(data + y * stride);
+            for (int x = 0; x < width; ++x) {
+                uint32_t pixel = row[x];
+                rgba_data[(y * width + x) * 4 + 0] = (pixel >> 16) & 0xff;
+                rgba_data[(y * width + x) * 4 + 1] = (pixel >> 8)  & 0xff;
+                rgba_data[(y * width + x) * 4 + 2] = (pixel >> 0)  & 0xff;
+                rgba_data[(y * width + x) * 4 + 3] = (pixel >> 24) & 0xff;
+            }
+        }
+#endif
+    }
+
+    render_and_display(rgba_data.data(), width, height, 4, false);
+    return true;
+#else
+    (void)page_number;
+    error = "This build does not include Poppler, so PDF support is unavailable.";
+    return false;
+#endif
+}
+
 static bool starts_with_scheme(const std::string& value, const std::string& scheme) {
     if (scheme.size() > value.size()) return false;
     return std::equal(scheme.begin(), scheme.end(), value.begin(), [](char a, char b) {
@@ -519,76 +657,14 @@ void display_image(const std::string& filename) {
     }
 #endif
 
-#ifdef HAVE_POPPLER
     if (!url_input && (ends_with(filename, ".pdf") || ends_with(filename, ".eps") || ends_with(filename, ".ps"))) {
-        Timer t_pdf("PDF Processing");
-        poppler::document* doc;
-        {
-            Timer t_load("PDF Load");
-            doc = poppler::document::load_from_file(filename);
+        PdfDocument document;
+        std::string error;
+        if (!document.open(filename, error) || !document.display_page(1, error)) {
+            std::cerr << "Error: " << error << std::endl;
         }
-        if (doc && doc->pages() > 0) {
-            poppler::page* p = doc->create_page(0);
-            if (p) {
-                // Compute ideal DPI based on terminal pixel dimensions
-                double max_w_pdf, max_h_pdf, px_per_col_pdf, px_per_row_pdf;
-                get_terminal_max_pixels(max_w_pdf, max_h_pdf, px_per_col_pdf, px_per_row_pdf);
-                poppler::rectf page_rect = p->page_rect();
-                double page_w_pts = page_rect.width();
-                double page_h_pts = page_rect.height();
-                double dpi_x = (page_w_pts > 0) ? max_w_pdf * 72.0 / page_w_pts : 150.0;
-                double dpi_y = (page_h_pts > 0) ? max_h_pdf * 72.0 / page_h_pts : 150.0;
-                // Use smaller DPI to preserve aspect ratio; clamp to [72, 300]
-                double dpi = std::max(72.0, std::min({dpi_x, dpi_y, 300.0}));
-                poppler::image img;
-                {
-                    Timer t_render("PDF Render");
-                    poppler::page_renderer renderer;
-                    renderer.set_render_hint(poppler::page_renderer::antialiasing, true);
-                    renderer.set_render_hint(poppler::page_renderer::text_antialiasing, true);
-                    img = renderer.render_page(p, dpi, dpi);
-                }
-                if (img.is_valid()) {
-                    int width = img.width();
-                    int height = img.height();
-                    std::vector<unsigned char> rgba_data(width * height * 4);
-                    {
-                        Timer t_conv("Pixel Conv");
-                        // Poppler ARGB32 has the same byte layout as Cairo ARGB32 (BGRA on LE).
-#ifdef HAVE_METAL
-                        const uint8_t perm[4] = {2, 1, 0, 3}; // BGRA → RGBA
-                        vImage_Buffer src_vimg = { (void*)img.const_data(),
-                            (vImagePixelCount)height, (vImagePixelCount)width,
-                            (size_t)img.bytes_per_row() };
-                        vImage_Buffer dst_vimg = { rgba_data.data(),
-                            (vImagePixelCount)height, (vImagePixelCount)width,
-                            (size_t)(width * 4) };
-                        vImagePermuteChannels_ARGB8888(&src_vimg, &dst_vimg, perm, kvImageNoFlags);
-#else
-                        const char* data = img.const_data();
-                        int stride = img.bytes_per_row();
-                        #pragma omp parallel for
-                        for (int y = 0; y < height; ++y) {
-                            const uint32_t* row = (const uint32_t*)(data + y * stride);
-                            for (int x = 0; x < width; ++x) {
-                                uint32_t pixel = row[x];
-                                rgba_data[(y * width + x) * 4 + 0] = (pixel >> 16) & 0xff;
-                                rgba_data[(y * width + x) * 4 + 1] = (pixel >> 8)  & 0xff;
-                                rgba_data[(y * width + x) * 4 + 2] = (pixel >> 0)  & 0xff;
-                                rgba_data[(y * width + x) * 4 + 3] = (pixel >> 24) & 0xff;
-                            }
-                        }
-#endif
-                    }
-                    render_and_display(rgba_data.data(), width, height, 4, false);
-                }
-                delete p;
-            }
-            delete doc;
-            return;
-        }
+        return;
     }
-#endif
 
     int width, height, channels;
     unsigned char* img;

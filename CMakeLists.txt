@@ -143,8 +143,17 @@ else()
 endif()
 
 # Executable
-add_executable(icat main.cpp)
+add_executable(icat main.cpp src/icat_cli.cpp)
+target_include_directories(icat PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(icat PRIVATE ImagePreview)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(icat_cli_tests tests/icat_cli_tests.cpp src/icat_cli.cpp)
+    target_include_directories(icat_cli_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(icat_cli_tests PRIVATE ImagePreview)
+    add_test(NAME icat_cli_tests COMMAND icat_cli_tests)
+endif()
 
 # Installation
 include(GNUInstallDirs)

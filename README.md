@@ -1,6 +1,6 @@
 # ImagePreview (icat) - C++ Image Preview Tool & Library
 
-A high-performance (6.5x than Python implementation) terminal image viewer and library written in C++ that supports standard image formats, SVG, PDF (first page), and EPS.
+A high-performance (6.5x than Python implementation) terminal image viewer and library written in C++ that supports standard image formats, SVG, multi-page PDF, and EPS.
 
 ## Features
 
@@ -10,7 +10,8 @@ A high-performance (6.5x than Python implementation) terminal image viewer and l
 - **Centered Output**: Images are centered by default in the terminal.
 - **Optional Format Support**:
   - **SVG**: High-quality vector rendering via `librsvg`.
-  - **PDF/EPS**: First page preview via `poppler-cpp`.
+  - **PDF/EPS**: PDF page rendering and EPS preview via `poppler-cpp`.
+- **PDF Reader**: Lightweight full-screen mode with page navigation and resize-aware redraws.
 - **Parallel Processing**: Uses OpenMP for faster image operations.
 
 ## Prerequisites
@@ -83,6 +84,24 @@ int main() {
 }
 ```
 
+For explicit PDF page control, keep the document open and render 1-based page numbers:
+
+```cpp
+#include <image_preview.h>
+#include <iostream>
+
+int main() {
+    ImagePreview::PdfDocument document;
+    std::string error;
+    if (!document.open("path/to/document.pdf", error) ||
+        !document.display_page(2, error)) {
+        std::cerr << error << '\n';
+        return 1;
+    }
+    return 0;
+}
+```
+
 ## CLI Usage (`icat`)
 
 If you just want to use the included tool:
@@ -91,7 +110,17 @@ If you just want to use the included tool:
 icat path/to/image.png
 icat path/to/vector.svg
 icat path/to/document.pdf
+icat --page 3 path/to/document.pdf
+icat --tui path/to/document.pdf
+icat --tui --page 3 path/to/document.pdf
 ```
+
+`--page` uses the page numbers shown by PDF readers, starting at 1. In `--tui`
+mode, use `h`/left arrow for the previous page, `l`/right arrow/space for the
+next page, `g` and `G` for the first and last page, and `q` to quit. The reader
+redraws the active page when the terminal is resized. TUI mode requires a local
+PDF and an interactive terminal; other image formats continue to use the normal
+single-preview behavior.
 
 Use the `--perf` flag to see performance metrics:
 
@@ -103,5 +132,5 @@ icat --perf path/to/image.jpg
 
 1. **Standard Images**: Uses `stb_image` to load PNG, JPG, BMP, etc.
 2. **SVG**: Renders via `librsvg` to a Cairo ARGB surface (with white background).
-3. **PDF/EPS**: Renders the first page via `poppler-cpp` at 150 DPI.
+3. **PDF/EPS**: Renders the selected PDF page (or the first EPS page) via `poppler-cpp`, choosing a DPI for the current terminal size.
 4. **Output**: Detects terminal capabilities (Kitty/Ghostty or iTerm2) and sends base64-encoded image data using the appropriate escape sequences.

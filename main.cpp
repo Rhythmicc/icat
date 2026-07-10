@@ -1,29 +1,22 @@
 #include <iostream>
 #include <string>
+#include "icat_cli.h"
 #include "image_preview.h"
 
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " [--perf] <filename>" << std::endl;
+    IcatCli::Options options;
+    std::string error;
+    if (!IcatCli::parse_options(argc, argv, options, error)) {
+        std::cerr << "Error: " << error << "\n\n"
+                  << IcatCli::usage(argv[0]) << std::endl;
         return 1;
     }
-
-    std::string filename;
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--perf") {
-            ImagePreview::perf_enabled = true;
-        } else {
-            filename = arg;
-        }
+    if (options.help) {
+        std::cout << IcatCli::usage(argv[0]) << std::endl;
+        return 0;
     }
 
-    if (filename.empty()) {
-        std::cerr << "Error: No filename provided." << std::endl;
-        return 1;
-    }
-
-    ImagePreview::display_image(filename);
+    int status = IcatCli::run(options);
 
     if (ImagePreview::perf_enabled) {
         std::cerr << "\n--- Performance Metrics ---\n";
@@ -33,5 +26,5 @@ int main(int argc, char** argv) {
         std::cerr << "---------------------------\n";
     }
 
-    return 0;
+    return status;
 }
