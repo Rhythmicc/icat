@@ -19,23 +19,49 @@ A high-performance (6.5x than Python implementation) terminal image viewer and l
 ### macOS (Homebrew)
 
 ```bash
-brew install pkg-config poppler librsvg cairo libomp
+brew install pkg-config poppler librsvg cairo libomp jpeg
 ```
 
 ### Ubuntu / Debian
 
 ```bash
 sudo apt update
-sudo apt install build-essential cmake pkg-config libpoppler-cpp-dev librsvg2-dev libcairo2-dev libomp-dev
+sudo apt install build-essential cmake pkg-config libcurl4-openssl-dev libjpeg-dev libpoppler-cpp-dev librsvg2-dev libcairo2-dev libomp-dev
 ```
 
 ### Fedora
 
 ```bash
-sudo dnf install cmake gcc-c++ pkgconfig poppler-cpp-devel librsvg2-devel cairo-devel libomp-devel
+sudo dnf install cmake gcc-c++ pkgconfig libcurl-devel libjpeg-turbo-devel poppler-cpp-devel librsvg2-devel cairo-devel libomp-devel
 ```
 
 ## Compilation & Installation
+
+### Prebuilt releases
+
+Version tags produce GitHub Release archives for macOS 15 (Apple Silicon and
+Intel) and Ubuntu 24.04 (ARM64 and x86_64). Download the archive matching your
+system from the [Releases page](https://github.com/Rhythmicc/icat/releases),
+extract it, and place `icat` somewhere on your `PATH`:
+
+```bash
+tar -xzf icat_VERSION_macos15_arm64.tar.gz
+sudo install -m 755 icat /usr/local/bin/icat
+```
+
+Replace `VERSION` with the release number without its leading `v`. Release
+archives contain a native dynamically linked executable, so install the
+platform prerequisites listed above before running it. Each release also
+contains `checksums.txt`. Compare the checksum of the archive you downloaded
+with its corresponding entry:
+
+```bash
+shasum -a 256 icat_VERSION_macos15_arm64.tar.gz
+grep 'icat_VERSION_macos15_arm64.tar.gz' checksums.txt
+```
+
+Windows is not currently published because the PDF TUI uses POSIX terminal
+interfaces (`termios`, `poll`, and Unix signals).
 
 ### Build and Install
 
@@ -61,6 +87,18 @@ Example:
 ```bash
 cmake -DBUILD_SHARED_LIBS=ON -DENABLE_PDF=OFF -DFORCE_KITTY_PROTOCOL=ON -S . -B build
 ```
+
+## Releasing
+
+After the release commit is on `main`, push an annotated version tag:
+
+```bash
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin v0.1.0
+```
+
+GitHub Actions builds and tests all four supported targets, generates SHA-256
+checksums, and creates or updates the corresponding GitHub Release.
 
 ## Using as a Library
 
