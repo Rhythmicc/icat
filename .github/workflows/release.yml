@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            label: macOS 15 ARM64
+            asset: macos15_arm64
+          - runner: macos-15-intel
+            label: macOS 15 Intel
+            asset: macos15_amd64
+          - runner: ubuntu-24.04-arm
+            label: Ubuntu 24.04 ARM64
+            asset: ubuntu24.04_arm64
+          - runner: ubuntu-24.04
+            label: Ubuntu 24.04 x86_64
+            asset: ubuntu24.04_amd64
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libcurl4-openssl-dev \
+            libjpeg-dev \
+            libomp-dev \
+            libpoppler-cpp-dev \
+            librsvg2-dev \
+            libcairo2-dev
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja pkg-config poppler librsvg libomp jpeg
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTING=ON \
+            -DENABLE_PDF=ON \
+            -DENABLE_SVG=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package
+        env:
+          ASSET: ${{ matrix.asset }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p dist/package
+          cp build/icat dist/package/icat
+          cp README.md dist/package/README.md
+          (cd dist/package && tar -czf "../icat_${version}_${ASSET}.tar.gz" icat README.md)
+
+      - name: Upload release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: icat_${{ matrix.asset }}
+          path: dist/icat_*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Generate checksums and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum icat_* > checksums.txt
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" icat_* checksums.txt \
+              --clobber --repo "${GITHUB_REPOSITORY}"
+          else
+            gh release create "${GITHUB_REF_NAME}" icat_* checksums.txt \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "icat ${GITHUB_REF_NAME}" --generate-notes
+          fi
