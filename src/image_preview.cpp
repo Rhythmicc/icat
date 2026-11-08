@@ -246,17 +246,13 @@ void render_and_display(unsigned char* img, int width, int height, int channels,
 
     int leading_spaces = std::max(0, (term_cols - img_cols) / 2);
 
-    char* term_env = std::getenv("TERM");
-    char* term_prog_env = std::getenv("TERM_PROGRAM");
-    std::string term = term_env ? term_env : "";
-    std::string term_program = term_prog_env ? term_prog_env : "";
-
-#ifdef FORCE_KITTY_PROTOCOL
-    bool is_kitty = true;
+    // Protocol is a build-time choice. A default build speaks the Kitty
+    // graphics protocol (also used by Ghostty and other Kitty-compatible
+    // terminals). -DUSE_ITERM2_PROTOCOL=ON selects iTerm2 inline images.
+#ifdef USE_ITERM2_PROTOCOL
+    bool is_kitty = false;
 #else
-    bool is_kitty = (term.find("kitty") != std::string::npos || 
-                     term_program.find("ghostty") != std::string::npos || 
-                     term_program.find("Ghostty") != std::string::npos);
+    bool is_kitty = true;
 #endif
 
     // Resize image to actual display pixel dimensions to reduce transmitted data

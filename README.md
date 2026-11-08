@@ -5,7 +5,7 @@ A high-performance (6.5x than Python implementation) terminal image viewer and l
 ## Features
 
 - **Library & CLI**: Build as a standalone tool (`icat`) or integrate `ImagePreview` as a library into your own projects.
-- **Terminal Support**: Native support for iTerm2, Kitty, and Ghostty terminal image protocols.
+- **Terminal Support**: The Kitty graphics protocol is the default (Kitty, Ghostty, and other Kitty-compatible terminals). The iTerm2 inline-image protocol remains available as a build option.
 - **Automatic Scaling**: Images are automatically scaled to fit terminal dimensions while preserving aspect ratio.
 - **Centered Output**: Images are centered by default in the terminal.
 - **Optional Format Support**:
@@ -80,12 +80,12 @@ You can customize the build during the configuration step:
 - `-DBUILD_SHARED_LIBS=ON`: Build as a shared library instead of static.
 - `-DENABLE_PDF=OFF`: Disable PDF/EPS support.
 - `-DENABLE_SVG=OFF`: Disable SVG support.
-- `-DFORCE_KITTY_PROTOCOL=ON`: Always use the Kitty output path even if terminal detection would normally fail.
+- `-DUSE_ITERM2_PROTOCOL=ON`: Emit the iTerm2 inline-image protocol. The default is the Kitty graphics protocol.
 
 Example:
 
 ```bash
-cmake -DBUILD_SHARED_LIBS=ON -DENABLE_PDF=OFF -DFORCE_KITTY_PROTOCOL=ON -S . -B build
+cmake -DBUILD_SHARED_LIBS=ON -DENABLE_PDF=OFF -DUSE_ITERM2_PROTOCOL=ON -S . -B build
 ```
 
 ## Releasing
@@ -171,4 +171,4 @@ icat --perf path/to/image.jpg
 1. **Standard Images**: Uses `stb_image` to load PNG, JPG, BMP, etc.
 2. **SVG**: Renders via `librsvg` to a Cairo ARGB surface (with white background).
 3. **PDF/EPS**: Renders the selected PDF page (or the first EPS page) via `poppler-cpp`, choosing a DPI for the current terminal size.
-4. **Output**: Detects terminal capabilities (Kitty/Ghostty or iTerm2) and sends base64-encoded image data using the appropriate escape sequences.
+4. **Output**: Sends base64-encoded image data with the Kitty graphics protocol. A build configured with `-DUSE_ITERM2_PROTOCOL=ON` uses the iTerm2 inline-image protocol instead.
