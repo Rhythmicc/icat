@@ -8,8 +8,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(ENABLE_PDF "Enable PDF/EPS support using Poppler" ON)
 option(ENABLE_SVG "Enable SVG support using librsvg" ON)
-# Kitty graphics protocol is the default. iTerm2 is an explicit opt-in.
-option(USE_ITERM2_PROTOCOL "Use the iTerm2 inline-image protocol instead of the Kitty graphics protocol" OFF)
+option(FORCE_KITTY_PROTOCOL "Force the Kitty graphics protocol instead of detecting the terminal" OFF)
+option(FORCE_ITERM2_PROTOCOL "Force the iTerm2 inline-image protocol instead of detecting the terminal" OFF)
 
 find_package(PkgConfig REQUIRED)
 find_package(CURL QUIET)
@@ -38,11 +38,16 @@ target_include_directories(ImagePreview PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-if(USE_ITERM2_PROTOCOL)
-    target_compile_definitions(ImagePreview PRIVATE USE_ITERM2_PROTOCOL)
-    message(STATUS "Image protocol: iTerm2 inline images")
+if(FORCE_KITTY_PROTOCOL AND FORCE_ITERM2_PROTOCOL)
+    message(FATAL_ERROR "FORCE_KITTY_PROTOCOL and FORCE_ITERM2_PROTOCOL cannot both be ON")
+elseif(FORCE_KITTY_PROTOCOL)
+    target_compile_definitions(ImagePreview PRIVATE FORCE_KITTY_PROTOCOL)
+    message(STATUS "Image protocol: Kitty graphics (forced)")
+elseif(FORCE_ITERM2_PROTOCOL)
+    target_compile_definitions(ImagePreview PRIVATE FORCE_ITERM2_PROTOCOL)
+    message(STATUS "Image protocol: iTerm2 inline images (forced)")
 else()
-    message(STATUS "Image protocol: Kitty graphics (default)")
+    message(STATUS "Image protocol: detect terminal (Kitty fallback)")
 endif()
 
 set(HAVE_CURL_INTERNAL OFF)
