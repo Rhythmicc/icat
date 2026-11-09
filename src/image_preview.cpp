@@ -246,17 +246,30 @@ void render_and_display(unsigned char* img, int width, int height, int channels,
 
     int leading_spaces = std::max(0, (term_cols - img_cols) / 2);
 
+#if defined(FORCE_KITTY_PROTOCOL) && defined(FORCE_ITERM2_PROTOCOL)
+#error FORCE_KITTY_PROTOCOL and FORCE_ITERM2_PROTOCOL cannot both be defined
+#elif defined(FORCE_KITTY_PROTOCOL)
+    bool is_kitty = true;
+#elif defined(FORCE_ITERM2_PROTOCOL)
+    bool is_kitty = false;
+#else
+    // Kitty when TERM contains "kitty" or TERM_PROGRAM identifies Ghostty.
+    // iTerm2 when TERM_PROGRAM is iTerm.app or LC_TERMINAL is iTerm2.
+    // Anything else falls back to the Kitty graphics protocol.
     char* term_env = std::getenv("TERM");
     char* term_prog_env = std::getenv("TERM_PROGRAM");
+    char* lc_terminal_env = std::getenv("LC_TERMINAL");
     std::string term = term_env ? term_env : "";
     std::string term_program = term_prog_env ? term_prog_env : "";
+    std::string lc_terminal = lc_terminal_env ? lc_terminal_env : "";
 
-#ifdef FORCE_KITTY_PROTOCOL
-    bool is_kitty = true;
-#else
-    bool is_kitty = (term.find("kitty") != std::string::npos || 
-                     term_program.find("ghostty") != std::string::npos || 
-                     term_program.find("Ghostty") != std::string::npos);
+    const bool kitty_terminal =
+        term.find("kitty") != std::string::npos ||
+        term_program.find("ghostty") != std::string::npos ||
+        term_program.find("Ghostty") != std::string::npos;
+    const bool iterm_terminal =
+        term_program == "iTerm.app" || lc_terminal == "iTerm2";
+    bool is_kitty = kitty_terminal || !iterm_terminal;
 #endif
 
     // Resize image to actual display pixel dimensions to reduce transmitted data

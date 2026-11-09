@@ -5,7 +5,7 @@ A high-performance (6.5x than Python implementation) terminal image viewer and l
 ## Features
 
 - **Library & CLI**: Build as a standalone tool (`icat`) or integrate `ImagePreview` as a library into your own projects.
-- **Terminal Support**: Native support for iTerm2, Kitty, and Ghostty terminal image protocols.
+- **Terminal Support**: Detects Kitty, Ghostty, and iTerm2 at runtime. Kitty and Ghostty use the Kitty graphics protocol; iTerm2 uses the inline-image protocol. Unrecognized terminals fall back to Kitty.
 - **Automatic Scaling**: Images are automatically scaled to fit terminal dimensions while preserving aspect ratio.
 - **Centered Output**: Images are centered by default in the terminal.
 - **Optional Format Support**:
@@ -80,7 +80,14 @@ You can customize the build during the configuration step:
 - `-DBUILD_SHARED_LIBS=ON`: Build as a shared library instead of static.
 - `-DENABLE_PDF=OFF`: Disable PDF/EPS support.
 - `-DENABLE_SVG=OFF`: Disable SVG support.
-- `-DFORCE_KITTY_PROTOCOL=ON`: Always use the Kitty output path even if terminal detection would normally fail.
+- `-DFORCE_KITTY_PROTOCOL=ON`: Always use the Kitty graphics protocol instead of detecting the terminal.
+- `-DFORCE_ITERM2_PROTOCOL=ON`: Always use the iTerm2 inline-image protocol instead of detecting the terminal.
+
+`FORCE_KITTY_PROTOCOL` and `FORCE_ITERM2_PROTOCOL` cannot both be enabled. When neither is set, icat detects the terminal:
+
+- Kitty graphics protocol when `TERM` contains `kitty`, or `TERM_PROGRAM` contains `ghostty` / `Ghostty`.
+- iTerm2 inline images when `TERM_PROGRAM` is `iTerm.app`, or `LC_TERMINAL` is `iTerm2`.
+- Kitty graphics protocol for any other terminal.
 
 Example:
 
@@ -171,4 +178,4 @@ icat --perf path/to/image.jpg
 1. **Standard Images**: Uses `stb_image` to load PNG, JPG, BMP, etc.
 2. **SVG**: Renders via `librsvg` to a Cairo ARGB surface (with white background).
 3. **PDF/EPS**: Renders the selected PDF page (or the first EPS page) via `poppler-cpp`, choosing a DPI for the current terminal size.
-4. **Output**: Detects terminal capabilities (Kitty/Ghostty or iTerm2) and sends base64-encoded image data using the appropriate escape sequences.
+4. **Output**: Detects the terminal and sends base64-encoded image data. Kitty and Ghostty use the Kitty graphics protocol; iTerm2 uses the inline-image protocol. Unrecognized terminals fall back to Kitty. `-DFORCE_KITTY_PROTOCOL=ON` or `-DFORCE_ITERM2_PROTOCOL=ON` skips detection.
